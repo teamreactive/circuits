@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>EL MODELADOR DE CIRCUITOS 9000</title>
+	<!-- <link rel="stylesheet" href="./normalize.css"> -->
+	<style>
+		#list {
+			position: fixed;
+			top: 0;
+			left: 0;
+			background-color: white;
+			padding: 15px;
+		}
+
+		#list li {
+			cursor: pointer;
+		}
+
+		#list li:hover {
+			text-decoration: underline;
+			color: blue;
+		}
+
+		#myCanvas {
+			margin: 0;
+			border: 0;
+		}
+	</style>
+</head>
+<body>
+	<div id="list">
+		<ul>
+			<li class="item">Resistencia</li>
+			<li class="item">Bobinas</li>
+			<li class="item">Condensador</li>
+			<li class="item">Fuente</li>
+		</ul>
+	</div>
+	<canvas id="myCanvas" width="300" height="100"></canvas>
+	<script>
+		var c = document.getElementById('myCanvas');
+		var ctx = c.getContext('2d');
+		ctx.canvas.width = window.innerWidth - 16;
+		ctx.canvas.height = window.innerHeight - 20;
+
+		c.addEventListener('mousedown', function (e) {
+			var n = items.length - 1;
+			var mouseX = e.clientX - 9;
+			var mouseY = e.clientY - 9;
+
+			for (var i = n; i >= 0; i--) {
+				if (items[i].collide(mouseX, mouseY)) {
+					selected = items[i];
+					touching = null;
+					prevMouse = e;
+					return;
+				}
+			}
+
+			for (var i = n; i >= 0; i--) {
+				if (items[i].touchPrev(mouseX, mouseY)) {
+					selected = null;
+					touching = {dir: 'prev', item: items[i]};
+					prevMouse = e;
+					refresh();
+					return;
+				}
+
+				if (items[i].touchNext(mouseX, mouseY)) {
+					selected = null;
+					touching = {dir: 'next', item: items[i]};
+					prevMouse = e;
+					refresh();
+					return;
+				}
+			}
+		});
+
+		c.addEventListener('mouseup', function (e) {
+			var n = items.length - 1;
+			var mouseX = e.clientX - 9;
+			var mouseY = e.clientY - 9;
+
+			if (touching && endpoint && !hasEdge(touching, endpoint)) {
+				if (touching.dir === 'prev' && endpoint.dir === 'prev') {
+					touching.item.prevItems.push({
+						dir: 'prev',
+						item: endpoint.item
+					});
+					endpoint.item.prevItems.push({
+						dir: 'prev',
+						item: touching.item
+					});
+				}
+
+				if (touching.dir === 'prev' && endpoint.dir === 'next') {
+					touching.item.prevItems.push({
+						dir: 'next',
+						item: endpoint.item
+					});
+					endpoint.item.nextItems.push({
+						dir: 'prev',
+						item: touching.item
+					});
+				}
+
+				if (touching.dir === 'next' && endpoint.dir === 'prev') {
+					touching.item.nextItems.push({
+						dir: 'prev',
+						item: endpoint.item
+					});
+					endpoint.item.prevItems.push({
+						dir: 'next',
+						item: touching.item
+					});
+				}
+
+				if (touching.dir === 'next' && endpoint.dir === 'next') {
+					touching.item.nextItems.push({
+						dir: 'next',
+						item: endpoint.item
+					});
+					endpoint.item.nextItems.push({
+						dir: 'next',
+						item: touching.item
+					});
+				}
+			}
+
+			selected = null;
+			touching = null;
+			endpoint = null
+			prevMouse = null;
+
+			refresh();
+		});
+
+		c.addEventListener('mousemove', function (e) {
+			var n = items.length - 1;
+			var mouseX = e.clientX - 9;
+			var mouseY = e.clientY - 9;
+
+			if (selected) {
+				var dx = prevMouse.clientX - e.clientX;
+				var dy = prevMouse.clientY - e.clientY;
+				
+				prevMouse = e;
+				selected.moveX(-dx);
+				selected.moveY(-dy);
+
+				refresh();
+			}
+
+			if (touching) {
+				var withend = false;
+				for (var i = n; i >= 0; i--) {
+					if (touching.item === items[i]) {
+						continue;
+					}
+
+					if (items[i].touchPrev(mouseX, mouseY)) {
+						endpoint = {dir: 'prev', item: items[i]};
+						withend = true;
+						break;
+					}
+
+					if (items[i].touchNext(mouseX, mouseY)) {
+						endpoint = {dir: 'next', item: items[i]};
+						withend = true;
+						break;
+					}
+				}
+				if (!withend) {
+					endpoint = null;
+				}
+				prevMouse = e;
+
+				refresh(mouseX, mouseY, true);
+			}
+		});
+
+		var selected = null;
+		var touching = null;
+		var endpoint = null;
+		var prevMouse = null;
+
+		var menu = document.getElementsByClassName('item');
+		for (var i = 0; i < menu.length; i++) {
+			menu[i].onclick = insert();
+		}
+
+		function insert() {
+			return function (e) {
+				var name = e.target.innerHTML;
+				var color = '#000000';
+				switch (name) {
+					case 'Resistencia':
+						color = '#FF0000';
+						break;
+					case 'Bobinas':
+						color = '#00FF00';
+						break;
+					case 'Condensador':
+						color = '#0000FF';
+						break;
+					case 'Fuente':
+						color = '#FFFF00';
+						break;
+				}
+				var item = addItem(name, color);
+				drawItem(item);
+			}
+		}
+
+		function refresh(mouseX, mouseY, moveLine) {
+			ctx.clearRect(0, 0, c.width, c.height);
+			drawAll(items);
+			if (touching) {
+				drawConn(touching);
+
+				if (endpoint) {
+					drawConn(endpoint);
+				}
+
+				if (moveLine) {
+					drawLine(touching, mouseX, mouseY);
+				}
+			}
+		}
+
+		var items = [];
+		
+		function Item(id, name, color) {
+			// Item's position
+			this.id = id;
+			this.x = 10;
+			this.y = ctx.canvas.height - 50;
+			this.w = 50;
+			this.h = 50;
+
+			// Item's properties
+			this.name = name;
+			this.color = color;
+
+			// Item's connections arrays
+			this.prevItems = [];
+			this.nextItems = [];
+
+			// Item's connections positions
+			this.prevX = this.x - 10;
+			this.nextX = this.x + this.w;
+			this.connY = this.y + this.h / 2 - 5;
+			this.connW = 10;
+			this.connH = 10;
+
+			// Make movements
+			this.moveX = function (dx) {
+				this.x += dx;
+				this.prevX += dx;
+				this.nextX += dx;
+			};
+			this.moveY = function (dy) {
+				this.y += dy;
+				this.connY += dy;
+			};
+
+			// Check collisions
+			this.touch = function (thisX, thisY, thisW, thisH, thatX, thatY) {
+				var mx = thisX < thatX && thatX < thisX + thisW;
+				var my = thisY < thatY && thatY < thisY + thisH;
+				return mx && my;
+			};
+			this.collide = function (x, y) {
+				return this.touch(this.x, this.y, this.w, this.h, x, y);
+			};
+			this.touchPrev = function (x, y) {
+				return this.touch(this.prevX, this.connY, this.connW, this.connH, x, y);
+			};
+			this.touchNext = function (x, y) {
+				return this.touch(this.nextX, this.connY, this.connW, this.connH, x, y);
+			};
+		}
+
+		function addItem(name, color) {
+			var n = items.length;
+			var id = n ? items[n - 1].id : 0;
+			var item = new Item(id + 1, name, color);
+			item.name = name;
+			item.color = color;
+			items.push(item);
+			return item;
+		}
+
+		function hasEdge(obj1, obj2) {
+			var edges;
+			if (obj1.dir === 'prev') {
+				edges = obj1.item.prevItems;
+			} else {
+				edges = obj1.item.nextItems;
+			}
+
+			for (var i = 0; i < edges.length; i++) {
+				if (edges[i].item === obj2.item && edges[i].dir === obj2.dir) {
+					return true;
+				}
+			}
+			return false;
+		}
+
+		function drawItem(item) {
+			ctx.fillStyle = item.color;
+			ctx.fillRect(item.x, item.y, item.w, item.h);
+			ctx.fillRect(item.prevX, item.connY, item.connW, item.connH);
+			ctx.fillRect(item.nextX, item.connY, item.connW, item.connH);
+			drawEdges(item, item.prevItems, 'prev');
+			drawEdges(item, item.nextItems, 'next');
+		}
+
+		function drawEdges(item, edges, dir) {
+			for (var i = 0; i < edges.length; i++) {
+				var that = edges[i];
+
+				var startX = item.connW / 2;
+				var startY = item.connY + item.connH / 2;
+				if (dir === 'prev') {
+					startX += item.prevX;
+				} else {
+					startX += item.nextX;
+				}
+
+				var endX = that.item.connW / 2;
+				var endY = that.item.connY + that.item.connH / 2;
+				if (that.dir === 'prev') {
+					endX += that.item.prevX;
+				} else {
+					endX += that.item.nextX;
+				}
+
+				ctx.strokeStyle = '#000000';
+				ctx.beginPath();
+				ctx.moveTo(startX, startY);
+				ctx.lineTo(endX, endY);
+				ctx.stroke();
+			}
+		}
+
+		function drawConn(obj) {
+			var x = 0;
+			var y = obj.item.connY + 2;
+			var w = obj.item.connW - 4;
+			var h = obj.item.connH - 4;
+			if (obj.dir === 'prev') {
+				x = obj.item.prevX + 2;
+			} else { // obj.dir === 'right'
+				x = obj.item.nextX + 2;
+			}
+
+			ctx.fillStyle = '#FFFFFF';
+			ctx.fillRect(x, y, w, h);
+		}
+
+		function drawLine(obj, mouseX, mouseY) {
+			var x = 0;
+			var y = obj.item.connY;
+			var w = obj.item.connW;
+			var h = obj.item.connH;
+			if (obj.dir === 'prev') {
+				x = obj.item.prevX;
+			} else { // obj.dir === 'right'
+				x = obj.item.nextX;
+			}
+
+			ctx.strokeStyle = '#000000';
+			ctx.beginPath();
+			ctx.moveTo(x + w / 2, y + h / 2);
+			ctx.lineTo(mouseX, mouseY);
+			ctx.stroke();
+		}
+
+		function drawAll(items) {
+			for (var i = 0; i < items.length; i++) {
+				drawItem(items[i]);
+			}
+		}
+	</script>
+</body>
+</html>
